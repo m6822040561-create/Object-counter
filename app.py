@@ -1,14 +1,3 @@
-import os
-import sys
-import subprocess
-
-# --- 1. ท่าไม้ตาย: บังคับถอนการติดตั้งตัวมีปัญหา และลง Headless อัตโนมัติ ---
-# โค้ดส่วนนี้จะทำงานแค่ครั้งเดียวตอนเซิร์ฟเวอร์เริ่มรัน เพื่อหลบหลีก OS Error
-if "OPENCV_FIXED" not in os.environ:
-    subprocess.check_call([sys.executable, "-m", "pip", "uninstall", "-y", "opencv-python"])
-    subprocess.check_call([sys.executable, "-m", "pip", "install", "opencv-python-headless"])
-    os.environ["OPENCV_FIXED"] = "True"
-
 import cv2
 import streamlit as st
 import numpy as np
