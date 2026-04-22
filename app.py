@@ -1,10 +1,21 @@
-import streamlit as st
+import os
+import sys
+import subprocess
+
+# --- 1. ท่าไม้ตาย: บังคับถอนการติดตั้งตัวมีปัญหา และลง Headless อัตโนมัติ ---
+# โค้ดส่วนนี้จะทำงานแค่ครั้งเดียวตอนเซิร์ฟเวอร์เริ่มรัน เพื่อหลบหลีก OS Error
+if "OPENCV_FIXED" not in os.environ:
+    subprocess.check_call([sys.executable, "-m", "pip", "uninstall", "-y", "opencv-python"])
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "opencv-python-headless"])
+    os.environ["OPENCV_FIXED"] = "True"
+
 import cv2
+import streamlit as st
 import numpy as np
 from ultralytics import YOLO
 import tempfile
 
-# --- 1. ฟังก์ชันคำนวณ IoU (จาก Colab ของคุณ) ---
+# --- 2. ฟังก์ชันคำนวณ IoU ---
 def get_iou(box1, box2):
     x1 = max(box1[0], box2[0])
     y1 = max(box1[1], box2[1])
@@ -15,18 +26,18 @@ def get_iou(box1, box2):
     area2 = (box2[2] - box2[0]) * (box2[3] - box2[1])
     return intersection / float(area1 + area2 - intersection + 1e-6)
 
-# --- 2. ตั้งค่าหน้าเว็บ ---
+# --- 3. ตั้งค่าหน้าเว็บ ---
 st.set_page_config(page_title="Recycle Conveyor Counter", layout="wide")
 st.title("♻️ ระบบตรวจจับและคัดแยกขยะบนสายพาน")
 
-# --- 3. โหลดโมเดล ---
+# --- 4. โหลดโมเดล ---
 @st.cache_resource
 def load_model():
     return YOLO("best.pt")
 
 model = load_model()
 
-# --- 4. Sidebar ตั้งค่า (ดึงค่ามาจาก Cell 5 ของคุณ) ---
+# --- 5. Sidebar ตั้งค่า ---
 st.sidebar.header("การตั้งค่าโมเดล")
 conf_threshold = st.sidebar.slider("Confidence Threshold", 0.1, 1.0, 0.2)
 iou_threshold = st.sidebar.slider("NMS IoU Threshold", 0.1, 1.0, 0.6)
@@ -34,7 +45,7 @@ overlap_check = st.sidebar.slider("Overlap Check (สำหรับการน
 
 class_names = {0: "can", 1: "glass", 2: "paperpack", 3: "plastic"}
 
-# --- 5. อัปโหลดและประมวลผลวิดีโอ ---
+# --- 6. อัปโหลดและประมวลผลวิดีโอ ---
 uploaded_video = st.file_uploader("อัปโหลดวิดีโอสายพาน (mp4, mov)...", type=['mp4', 'mov'])
 
 if uploaded_video is not None:
@@ -45,7 +56,6 @@ if uploaded_video is not None:
     w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
     h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
     
-    # แบ่งหน้าจอแสดงผล: ซ้ายวิดีโอ ขวาสถิติ
     col1, col2 = st.columns([3, 1])
     st_frame = col1.empty()
     st_stats = col2.empty()
@@ -58,7 +68,6 @@ if uploaded_video is not None:
         ret, frame = cap.read()
         if not ret: break
         
-        # รันโมเดล
         results = model(frame, conf=conf_threshold, iou=iou_threshold, verbose=False)[0]
         raw_boxes = results.boxes.xyxy.cpu().numpy()
         raw_cls = results.boxes.cls.cpu().numpy().astype(int)
@@ -66,7 +75,6 @@ if uploaded_video is not None:
         current_boxes = []
         current_cls = []
         
-        # กรอง Noise
         for i, box in enumerate(raw_boxes):
             bw, bh = box[2] - box[0], box[3] - box[1]
             if bw < (w * 0.8) and bh < (h * 0.8):
@@ -81,7 +89,6 @@ if uploaded_video is not None:
             cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 3)
             cv2.putText(frame, label.upper(), (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
             
-            # ลอจิกการนับของคุณ
             is_new = True
             for p_box in prev_boxes:
                 if get_iou(c_box, p_box) > overlap_check:
@@ -93,22 +100,8 @@ if uploaded_video is not None:
                 
         prev_boxes = current_boxes
         
-        # พิมพ์ตัวเลขลงบนวิดีโอ (เหมือน Colab)
         y_pos = 100
         for name, val in counts.items():
             cv2.putText(frame, f'{name.upper()}: {val}', (50, y_pos), cv2.FONT_HERSHEY_SIMPLEX, 1.2, (0, 255, 255), 3)
             y_pos += 50
-        cv2.putText(frame, f'TOTAL: {total_count}', (50, y_pos + 30), cv2.FONT_HERSHEY_SIMPLEX, 1.8, (0, 0, 255), 4)
-        
-        # อัปเดตวิดีโอบน Streamlit (แปลง BGR เป็น RGB)
-        st_frame.image(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB), use_column_width=True)
-        
-        # อัปเดตตารางสถิติด้านขวา
-        with st_stats.container():
-            st.markdown("### 📊 สถิติแบบ Real-time")
-            st.metric("Total Objects", total_count)
-            for name, val in counts.items():
-                st.metric(f"🟢 {name.capitalize()}", val)
-
-    cap.release()
-    st.success("✅ ประมวลผลวิดีโอเสร็จสิ้น!")
+        cv2.putText(frame, f'TOTAL: {total_count}', (50, y_pos + 30), cv2.FONT
