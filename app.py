@@ -104,4 +104,4 @@ if uploaded_video is not None:
         for name, val in counts.items():
             cv2.putText(frame, f'{name.upper()}: {val}', (50, y_pos), cv2.FONT_HERSHEY_SIMPLEX, 1.2, (0, 255, 255), 3)
             y_pos += 50
-        cv2.putText(frame, f'TOTAL: {total_count}', (50, y_pos + 30), cv2.FONT
+        cv2.putText(frame, f'TOTAL: {total_count}', (50, y_pos + 30), cv2.FONT_HERSHEY_SIMPLEX, 1.8, (0, 0, 255), 4)
