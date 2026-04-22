@@ -3,6 +3,7 @@ import streamlit as st
 import numpy as np
 from ultralytics import YOLO
 import tempfile
+import subprocess
 
 # --- 2. ฟังก์ชันคำนวณ IoU ---
 def get_iou(box1, box2):
@@ -38,30 +39,35 @@ class_names = {0: "can", 1: "glass", 2: "paperpack", 3: "plastic"}
 uploaded_video = st.file_uploader("อัปโหลดวิดีโอสายพาน (mp4, mov)...", type=['mp4', 'mov'])
 
 if uploaded_video is not None:
-    tfile = tempfile.NamedTemporaryFile(delete=False)
+    tfile = tempfile.NamedTemporaryFile(delete=False, suffix='.mp4')
     tfile.write(uploaded_video.read())
     
     cap = cv2.VideoCapture(tfile.name)
+    fps = cap.get(cv2.CAP_PROP_FPS) # ดึงค่า FPS เพื่อให้วิดีโอเล่นเนียนเท่าต้นฉบับ
+    if fps == 0 or fps is None: fps = 30
+    
+    # 1. เตรียมไฟล์สำหรับแอบบันทึกวิดีโอเบื้องหลัง
+    temp_out = tempfile.NamedTemporaryFile(delete=False, suffix='.mp4')
+    fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+    out = cv2.VideoWriter(temp_out.name, fourcc, int(fps), (640, 360))
     
     col1, col2 = st.columns([3, 1])
     st_frame = col1.empty()
     st_stats = col2.empty()
-    st_progress = st.empty() # เพิ่มข้อความบอกสถานะให้รู้ว่าระบบยังไม่ตาย
+    st_progress = st.empty()
     
     prev_boxes = []
     counts = {name: 0 for name in class_names.values()}
     total_count = 0
     frame_count = 0
     
-    st_progress.info("⏳ กำลังเตรียมวิดีโอ กรุณารอสักครู่...")
+    st_progress.info("⏳ กำลังเตรียมวิดีโอและเริ่มประมวลผล กรุณารอสักครู่...")
     
     while cap.isOpened():
         ret, frame = cap.read()
         if not ret: break
         
         frame_count += 1
-        
-        # 1. ย่อขนาดภาพให้เล็กลง เพื่อให้ AI รันไวขึ้น 4 เท่า!
         frame = cv2.resize(frame, (640, 360))
         w, h = 640, 360
         
@@ -97,14 +103,16 @@ if uploaded_video is not None:
                 
         prev_boxes = current_boxes
         
-        # พิมพ์ตัวเลขทับบนวิดีโอ
         y_pos = 50
         for name, val in counts.items():
             cv2.putText(frame, f'{name.upper()}: {val}', (30, y_pos), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 255), 2)
             y_pos += 30
         cv2.putText(frame, f'TOTAL: {total_count}', (30, y_pos + 10), cv2.FONT_HERSHEY_SIMPLEX, 1.2, (0, 0, 255), 3)
         
-        # 2. ลดการส่งภาพขึ้นหน้าจอ (อัปเดตจอภาพ 1 ครั้งต่อ 3 เฟรม)
+        # 2. บันทึกภาพลงไฟล์วิดีโอทุกเฟรม
+        out.write(frame)
+        
+        # แสดงผลโชว์ความคืบหน้าบนเว็บ
         if frame_count % 3 == 0:
             st_progress.info(f"⚙️ กำลังประมวลผล... (ผ่านไปแล้ว {frame_count} เฟรม)")
             st_frame.image(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB), use_column_width=True)
@@ -116,4 +124,30 @@ if uploaded_video is not None:
                     st.metric(f"🟢 {name.capitalize()}", val)
 
     cap.release()
-    st_progress.success(f"✅ ประมวลผลเสร็จสิ้นทั้งหมด {frame_count} เฟรม!")
+    out.release() 
+    st_frame.empty() # ล้างภาพนิ่งที่ค้างหน้าจอออก
+    
+    # 3. แปลงไฟล์วิดีโอให้รองรับบนเว็บไซต์
+    st_progress.info("🔄 ประมวลผลเสร็จแล้ว กำลังสร้างเครื่องเล่นวิดีโอ...")
+    final_out = tempfile.NamedTemporaryFile(delete=False, suffix='.mp4')
+    subprocess.run(["ffmpeg", "-y", "-i", temp_out.name, "-vcodec", "libx264", "-preset", "ultrafast", final_out.name], capture_output=True)
+    
+    st_progress.success(f"✅ เสร็จสมบูรณ์! ตรวจจับวัตถุไปทั้งหมด {total_count} ชิ้น")
+    
+    # 4. แสดงเครื่องเล่นวิดีโอของแท้ (กด Play/Pause/เลื่อนเวลาได้)
+    st.video(final_out.name)
+# ... (โค้ดส่วนประมวลผลและแปลงไฟล์ด้วย ffmpeg เดิม) ...
+    
+    st_progress.success(f"✅ เสร็จสมบูรณ์! ตรวจจับวัตถุไปทั้งหมด {total_count} ชิ้น")
+    
+    # 1. แสดงเครื่องเล่นวิดีโอให้ดูบนเว็บ
+    st.video(final_out.name)
+    
+    # 2. เพิ่มปุ่มดาวน์โหลดไฟล์ลงเครื่อง
+    with open(final_out.name, "rb") as file:
+        btn = st.download_button(
+            label="💾 ดาวน์โหลดวิดีโอผลลัพธ์",
+            data=file,
+            file_name="detected_conveyor_video.mp4",
+            mime="video/mp4"
+        )
