@@ -42,20 +42,28 @@ if uploaded_video is not None:
     tfile.write(uploaded_video.read())
     
     cap = cv2.VideoCapture(tfile.name)
-    w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-    h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
     
     col1, col2 = st.columns([3, 1])
     st_frame = col1.empty()
     st_stats = col2.empty()
+    st_progress = st.empty() # เพิ่มข้อความบอกสถานะให้รู้ว่าระบบยังไม่ตาย
     
     prev_boxes = []
     counts = {name: 0 for name in class_names.values()}
     total_count = 0
+    frame_count = 0
+    
+    st_progress.info("⏳ กำลังเตรียมวิดีโอ กรุณารอสักครู่...")
     
     while cap.isOpened():
         ret, frame = cap.read()
         if not ret: break
+        
+        frame_count += 1
+        
+        # 1. ย่อขนาดภาพให้เล็กลง เพื่อให้ AI รันไวขึ้น 4 เท่า!
+        frame = cv2.resize(frame, (640, 360))
+        w, h = 640, 360
         
         results = model(frame, conf=conf_threshold, iou=iou_threshold, verbose=False)[0]
         raw_boxes = results.boxes.xyxy.cpu().numpy()
@@ -89,8 +97,23 @@ if uploaded_video is not None:
                 
         prev_boxes = current_boxes
         
-        y_pos = 100
+        # พิมพ์ตัวเลขทับบนวิดีโอ
+        y_pos = 50
         for name, val in counts.items():
-            cv2.putText(frame, f'{name.upper()}: {val}', (50, y_pos), cv2.FONT_HERSHEY_SIMPLEX, 1.2, (0, 255, 255), 3)
-            y_pos += 50
-        cv2.putText(frame, f'TOTAL: {total_count}', (50, y_pos + 30), cv2.FONT_HERSHEY_SIMPLEX, 1.8, (0, 0, 255), 4)
+            cv2.putText(frame, f'{name.upper()}: {val}', (30, y_pos), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 255), 2)
+            y_pos += 30
+        cv2.putText(frame, f'TOTAL: {total_count}', (30, y_pos + 10), cv2.FONT_HERSHEY_SIMPLEX, 1.2, (0, 0, 255), 3)
+        
+        # 2. ลดการส่งภาพขึ้นหน้าจอ (อัปเดตจอภาพ 1 ครั้งต่อ 3 เฟรม)
+        if frame_count % 3 == 0:
+            st_progress.info(f"⚙️ กำลังประมวลผล... (ผ่านไปแล้ว {frame_count} เฟรม)")
+            st_frame.image(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB), use_column_width=True)
+            
+            with st_stats.container():
+                st.markdown("### 📊 สถิติแบบ Real-time")
+                st.metric("Total Objects", total_count)
+                for name, val in counts.items():
+                    st.metric(f"🟢 {name.capitalize()}", val)
+
+    cap.release()
+    st_progress.success(f"✅ ประมวลผลเสร็จสิ้นทั้งหมด {frame_count} เฟรม!")
